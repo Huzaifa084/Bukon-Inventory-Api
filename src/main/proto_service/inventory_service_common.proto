@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package io.bokun.inventory.service.common.grpc;
+
+option java_multiple_files = true;
+option java_package = "io.bokun.inventory.service.common.grpc";
+
+import "common.proto";
+
+// wraps vendor id and nothing else
+message VendorId {
+    int64 id = 1;
+}
+
+message BokunProduct {
+    int64 id = 1;
+    io.bokun.inventory.common.api.grpc.ProductCategory category = 2;
+}
+
+// Maps two entities between Bokun and external system.
+message BokunToExternalMapping {
+    // Might refer to any type within Bokun, the context will reflect circumstances (e.g. might mean pricing category id in Bokun). Mandatory.
+    string bokunId = 1;
+
+    // Whatever counterpart there is on the external system. Mandatory.
+    string externalId = 2;
+}

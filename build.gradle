@@ -1,0 +1,422 @@
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
+import io.swagger.codegen.config.CodegenConfigurator
+import io.swagger.codegen.DefaultGenerator
+
+
+buildscript {
+    apply plugin: 'java'
+    ext {
+        awsVersion = '1.11.283'
+        protobufVersion = '0.9.4'
+        grpcVersion = '1.59.0'
+    }
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        jcenter()
+    }
+    dependencies {
+        classpath("com.amazonaws:aws-java-sdk-core:${awsVersion}")
+        classpath("com.amazonaws:aws-java-sdk-s3:${awsVersion}")
+        classpath "com.google.protobuf:protobuf-gradle-plugin:${protobufVersion}"
+        classpath 'io.swagger:swagger-codegen:2.2.3'
+        classpath 'io.swagger:swagger-annotations:1.5.19'
+        classpath 'io.swagger:swagger-core:1.5.19'
+        classpath 'com.google.code.gson:gson:2.8.9'
+    }
+}
+
+group 'io.bokun.inventory'
+version '0.4.3'
+
+apply plugin: "com.google.protobuf"
+apply plugin: "java"
+apply plugin: "application"
+apply plugin: "idea"
+apply plugin: "maven-publish"
+
+def commonArtifact = 'common-api'
+def pluginArtifact = 'plugin-api'
+def serviceArtifact = 'service-api'
+
+def protoGenDir = "$projectDir/src/generated-proto"
+def swaggerGenDir = "$projectDir/src/generated-swagger"
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:3.21.7"
+    }
+    plugins {
+        grpc {
+            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
+        }
+    }
+    generateProtoTasks {
+        all()*.plugins {
+            grpc {}
+        }
+        all().each { task ->
+            task.builtins {
+                java {
+                    option 'lite'
+                }
+            }
+        }
+    }
+    generatedFilesBaseDir = protoGenDir
+}
+
+def swaggerInput = file("src/main/swagger/inventory_api.json").absolutePath
+def swaggerOutputDir = file(swaggerGenDir + "/main/java")
+
+tasks.register('generateApi') {
+    inputs.file(swaggerInput)
+    outputs.dir(swaggerOutputDir)
+    doLast {
+        def config = new CodegenConfigurator()
+        config.setInputSpec(swaggerInput)
+        config.setOutputDir(swaggerOutputDir.path)
+        config.setLang('java')
+        config.setAdditionalProperties([
+                'invokerPackage'         : 'io.bokun.inventory.plugin.api.rest',
+                'modelPackage'           : 'io.bokun.inventory.plugin.api.rest',
+                'apiPackage'             : 'io.bokun.inventory.plugin.api.rest',
+                'dateLibrary'            : 'java8',
+                'hideGenerationTimestamp': 'true',
+                'sourceFolder'           : '.'
+        ])
+        config.setSystemProperties([
+                'modelTests': 'false',
+                'modelDocs' : 'false',
+                'apiTests'  : 'false',
+                'apiDocs'   : 'false',
+                'models'    : ''
+        ])
+        new DefaultGenerator().opts(config.toClientOptInput()).generate()
+    }
+}
+
+clean {
+    doLast {
+        delete(file(protoGenDir))
+        delete(file(swaggerGenDir))
+    }
+}
+
+configurations {
+    swagger
+    swaggerCompile
+    grpcCompile
+}
+
+sourceSets {
+    swagger {
+        java {
+            srcDir file("$swaggerGenDir/main/java")
+        }
+        compileClasspath = configurations.swaggerCompile
+    }
+
+    grpc {
+        java {
+            srcDir file("$protoGenDir/main/java")
+        }
+        compileClasspath = configurations.grpcCompile
+    }
+
+    main {
+        proto {
+            srcDir 'src/main/proto_common'
+            srcDir 'src/main/proto_plugin'
+            srcDir 'src/main/proto_service'
+        }
+        java {
+            srcDir 'src/main/java'
+            // Remove the generated source directories from main source set
+            // srcDir file("$protoGenDir/main/java")
+            // srcDir file("$swaggerGenDir/main/java")
+        }
+    }
+}
+
+dependencies {
+    // Core dependencies
+    implementation "io.grpc:grpc-all:${grpcVersion}"
+    implementation 'io.swagger:swagger-annotations:1.5.19'
+    implementation 'io.swagger:swagger-core:1.5.19'
+    implementation 'com.google.code.gson:gson:2.8.9'
+
+    // Swagger-specific dependencies
+    swaggerCompile 'io.swagger:swagger-codegen:2.2.3'
+    swaggerCompile 'io.swagger:swagger-core:1.5.19'
+    swaggerCompile 'io.swagger:swagger-annotations:1.5.19'
+    swaggerCompile 'com.google.code.gson:gson:2.8.9'
+    swaggerCompile 'com.fasterxml.jackson.core:jackson-databind:2.13.4'
+
+    // gRPC-specific dependencies
+    grpcCompile "io.grpc:grpc-all:${grpcVersion}"
+    grpcCompile "com.google.protobuf:protobuf-java:3.21.7"
+
+    // Make everything available at runtime
+    runtimeOnly "io.grpc:grpc-all:${grpcVersion}"
+    runtimeOnly "com.google.protobuf:protobuf-java:3.21.7"
+    runtimeOnly 'io.swagger:swagger-annotations:1.5.19'
+    runtimeOnly 'io.swagger:swagger-core:1.5.19'
+    runtimeOnly 'com.google.code.gson:gson:2.8.9'
+    runtimeOnly 'com.fasterxml.jackson.core:jackson-databind:2.13.4'
+}
+
+tasks.register('compileSwaggerJavaCustom', JavaCompile) {
+    source = sourceSets.swagger.java.srcDirs
+    classpath = configurations.swaggerCompile
+    destinationDirectory = file("$buildDir/classes/java/swagger")
+    options.compilerArgs += ["-proc:none"]
+}
+
+tasks.register('compileGrpcJavaCustom', JavaCompile) {
+    source = sourceSets.grpc.java.srcDirs
+    classpath = configurations.grpcCompile
+    destinationDirectory = file("$buildDir/classes/java/grpc")
+    options.compilerArgs += ["-proc:none"]
+}
+
+compileJava {
+    source = sourceSets.main.java.srcDirs
+    dependsOn compileSwaggerJavaCustom, compileGrpcJavaCustom
+    classpath = configurations.compileClasspath
+
+    doFirst {
+        classpath = classpath + files("$buildDir/classes/java/swagger") + files("$buildDir/classes/java/grpc")
+    }
+}
+
+compileSwaggerJavaCustom.dependsOn generateApi
+compileGrpcJavaCustom.dependsOn generateProto
+
+// Set Java compatibility
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+tasks.register('mergeCompiledClasses', Copy) {
+    dependsOn compileSwaggerJavaCustom, compileGrpcJavaCustom, compileJava
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from("$buildDir/classes/java/main") {
+        include "**/*.class"
+    }
+
+    from("$buildDir/classes/java/swagger") {
+        include "**/*.class"
+    }
+
+    from("$buildDir/classes/java/grpc") {
+        include "**/*.class"
+        // Filter out any classes that conflict with Swagger classes
+        exclude "io/bokun/inventory/common/api/grpc/**/*Builder.class"
+        exclude "io/bokun/inventory/common/api/grpc/**/*OrBuilder.class"
+        exclude "io/bokun/inventory/plugin/api/grpc/**/*Builder.class"
+        exclude "io/bokun/inventory/plugin/api/grpc/**/*OrBuilder.class"
+        exclude "io/bokun/inventory/service/api/grpc/**/*Builder.class"
+        exclude "io/bokun/inventory/service/api/grpc/**/*OrBuilder.class"
+        exclude "grpc/health/v1/*Builder.class"
+        exclude "grpc/health/v1/*OrBuilder.class"
+        exclude "grpc/health/v1/HealthService\$1.class"
+    }
+
+    into "$buildDir/classes/java/merged"
+}
+
+classes {
+    dependsOn mergeCompiledClasses
+    doLast {
+        copy {
+            from "$buildDir/classes/java/merged"
+            into "$buildDir/classes/java/main"
+        }
+    }
+}
+
+configurations.configureEach {
+    resolutionStrategy.cacheDynamicVersionsFor 0, 'hours'
+    resolutionStrategy.cacheChangingModulesFor 0, 'hours'
+}
+
+if (project.hasProperty('branch')) {
+    println("branch: " + project.property('branch'))
+}
+
+// Fix the AWS credentials handling to prevent build failure
+/*** Set Environment variables for AWS credentials:
+ * export AWS_ACCESS_KEY_ID=your_access_key
+ * export AWS_SECRET_ACCESS_KEY=your_secret_key
+ ***/
+def awsCredentials = null
+try {
+    def credProvider = DefaultAWSCredentialsProviderChain.getInstance()
+    if (credProvider != null) {
+        awsCredentials = credProvider.credentials
+        println("AWS credentials found: " + awsCredentials.AWSAccessKeyId)
+    }
+} catch (Exception e) {
+    println("AWS credentials not found. S3 repositories will not be available: " + e.message)
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    jcenter()
+
+    // Only add S3 repositories if credentials are available
+    if (awsCredentials != null) {
+        maven {
+            url "s3://pmr.bokun.io/snapshots"
+            credentials(AwsCredentials) {
+                accessKey awsCredentials.AWSAccessKeyId
+                secretKey awsCredentials.AWSSecretKey
+            }
+        }
+        maven {
+            url "s3://pmr.bokun.io/release"
+            credentials(AwsCredentials) {
+                accessKey awsCredentials.AWSAccessKeyId
+                secretKey awsCredentials.AWSSecretKey
+            }
+        }
+    }
+}
+
+idea {
+    module {
+        sourceDirs += file("${protoGenDir}/main/java");
+        sourceDirs += file("${protoGenDir}/main/grpc");
+        sourceDirs += file("${swaggerGenDir}/main/java");
+    }
+}
+
+startScripts.enabled = false
+
+tasks.register('commonApi', Jar) {
+    archiveBaseName = 'commonapi'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from sourceSets.main.output.classesDirs
+    from("$buildDir/classes/java/grpc") {
+        include 'io/bokun/inventory/common/**'
+        exclude 'io/bokun/inventory/common/api/grpc/**/*Builder.class'
+        exclude 'io/bokun/inventory/common/api/grpc/**/*OrBuilder.class'
+    }
+    from("$buildDir/classes/java/swagger") {
+        include 'io/bokun/inventory/common/**'
+        include 'io/bokun/inventory/plugin/api/rest/**'
+        include 'io/bokun/inventory/util/**'
+    }
+}
+
+tasks.register('pluginApi', Jar) {
+    archiveBaseName = 'pluginapi'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from sourceSets.main.output.classesDirs
+    from("$buildDir/classes/java/grpc") {
+        include 'io/bokun/inventory/plugin/**'
+        exclude 'io/bokun/inventory/plugin/api/grpc/**/*Builder.class'
+        exclude 'io/bokun/inventory/plugin/api/grpc/**/*OrBuilder.class'
+    }
+    from("$buildDir/classes/java/swagger") {
+        include 'io/bokun/inventory/plugin/**'
+    }
+}
+
+tasks.register('serviceApi', Jar) {
+    archiveBaseName = 'serviceapi'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from sourceSets.main.output.classesDirs
+    from("$buildDir/classes/java/grpc") {
+        include 'io/bokun/inventory/service/**'
+        include 'grpc/health/v1/**'
+        exclude 'io/bokun/inventory/service/**/*Builder.class'
+        exclude 'io/bokun/inventory/service/**/*OrBuilder.class'
+        exclude 'grpc/health/v1/*Builder.class'
+        exclude 'grpc/health/v1/*OrBuilder.class'
+        exclude 'grpc/health/v1/HealthService\$1.class'
+    }
+    from("$buildDir/classes/java/swagger") {
+        include 'io/bokun/inventory/service/**'
+    }
+}
+
+if (awsCredentials != null) {
+    println("publish : " + awsCredentials.AWSAccessKeyId)
+    publishing {
+        println "Will publish to Private S3 repository"
+        publications {
+            common(MavenPublication) {
+                groupId = project.group
+                artifactId = commonArtifact
+                version = project.version
+                artifact(commonApi)
+                pom {
+                    description = 'Common GRPC API library for inventory plugin api and inventory service api2'
+                }
+            }
+
+            plugin(MavenPublication) {
+                groupId = project.group
+                artifactId = pluginArtifact
+                version = project.version
+                artifact(pluginApi)
+
+                pom {
+                    description = 'Inventory Service Plugin GRPC API library'
+
+                    withXml {
+                        def dependenciesNode = asNode().appendNode('dependencies')
+                        def dependencyNode = dependenciesNode.appendNode('dependency')
+                        dependencyNode.appendNode('groupId', project.group)
+                        dependencyNode.appendNode('artifactId', commonArtifact)
+                        dependencyNode.appendNode('version', project.version)
+                    }
+                }
+            }
+
+            service(MavenPublication) {
+                groupId = project.group
+                artifactId = serviceArtifact
+                version = project.version
+                artifact(serviceApi)
+
+                pom {
+                    description = 'Internal Inventory Service GRPC API library'
+
+                    withXml {
+                        def dependenciesNode = asNode().appendNode('dependencies')
+                        def dependencyNode = dependenciesNode.appendNode('dependency')
+                        dependencyNode.appendNode('groupId', project.group)
+                        dependencyNode.appendNode('artifactId', commonArtifact)
+                        dependencyNode.appendNode('version', project.version)
+                    }
+                }
+            }
+        }
+
+        repositories {
+            maven {
+                url "s3://pmr.bokun.io/release"
+                credentials(AwsCredentials) {
+                    accessKey awsCredentials.AWSAccessKeyId
+                    secretKey awsCredentials.AWSSecretKey
+                }
+            }
+            maven {
+                url "s3://public-pmr.bokun.io/release"
+                credentials(AwsCredentials) {
+                    accessKey awsCredentials.AWSAccessKeyId
+                    secretKey awsCredentials.AWSSecretKey
+                }
+            }
+        }
+    }
+} else {
+    println "AWS Credentials not found."
+}

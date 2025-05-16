@@ -1,0 +1,172 @@
+syntax = "proto3";
+
+package io.bokun.inventory.service.booking.grpc;
+
+option java_multiple_files = true;
+option java_package = "io.bokun.inventory.service.booking.grpc";
+
+import "common.proto";
+import "inventory_service_common.proto";
+
+service BookingService {
+    // Reserve capacity for a product for limited time. Please using blocking API for this as the result of this is atomic: all requests should either
+    // succeed or fail; there can be no half/success.
+    //
+    // The two step process (this method + ConfirmBooking) is always called from the platform. If PluginDefinition::capabilities does not support
+    // SUPPORTS_RESERVATIONS, inventory service will mock this call into one transaction. However this is transparent from the plaform side which
+    // always makes two calls.
+    rpc CreateReservation (ReservationRequest) returns (io.bokun.inventory.common.api.grpc.ReservationResponse) {}
+
+    // This call allows the reseller to indicate that previously made reservation should be cancelled.
+    // It is not strictly required to implement this method; in which case the receiving end should automatically proceed with cancellations after
+    // certain time period elapses. The length of such period may change from reseller to reseller but we recommend using 30 minutes for now.
+    // Implementing this method allows more efficient resource management as reserved seats can be unblocked somewhat earlier.
+    // Both PluginCapability::SUPPORTS_RESERVATIONS and PluginCapability::SUPPORTS_RESERVATION_CANCELLATION must be present in your plugin definition
+    // in order to enable calls to this method.
+    rpc CancelReservation(CancelReservationRequest) returns (io.bokun.inventory.common.api.grpc.CancelReservationResponse) {}
+
+    // Once reserved, proceed with booking.
+    //
+    // The two step process (CreateReservation + this method) is always called from the platform. If PluginDefinition::capabilities does not support
+    // SUPPORTS_RESERVATIONS, inventory service will mock this call into one transaction. However this is transparent from the plaform side which
+    // always makes two calls.
+    rpc ConfirmBooking (ConfirmBookingRequest) returns (io.bokun.inventory.common.api.grpc.ConfirmBookingResponse) {}
+
+    // Once booked, a booking may be cancelled using booking ref number.
+    rpc CancelBooking (CancelBookingRequest) returns (io.bokun.inventory.common.api.grpc.CancelBookingResponse) {}
+
+    // Allows to amend existing confirmed (non-cancelled) booking.
+    // Implementing this method is optional.
+    // Not implementing this method results:
+    // - your system not receiving amendments from those sales channels which support it (e.g. Viator).
+    // - Bokun responding positively to such amendments from incoming sources without relaying this information further.
+    // Amendment result may or may not be successful, e.g. if the new date is sold out then it is perfectly legal to fail such amendment.
+    rpc AmendBooking (AmendBookingRequest) returns (io.bokun.inventory.common.api.grpc.AmendBookingResponse) {}
+}
+
+message ReservationRequest {
+    // Product to reserve. Mandatory
+    io.bokun.inventory.service.common.grpc.BokunProduct bokunProduct = 1;
+
+    // Information pertaining to reservation. Mandatory.
+    ReservationData reservationData = 2;
+}
+
+message CancelReservationRequest {
+    // product, *exactly* as used with CreateReservation request. Mandatory.
+    io.bokun.inventory.service.common.grpc.BokunProduct bokunProduct = 1;
+
+    // Exactly as returned by io.bokun.inventory.common.api.grpc.SuccessfulReservation::reservationConfirmationCode. Mandatory.
+    string reservationConfirmationCode = 2;
+
+    // agent code if passed. Optional.
+    string agentCode = 3;
+}
+
+message ReservationData {
+    // Contact of the customer who has reserved this booking (otherwise known as "lead customer"). Optional.
+    io.bokun.inventory.common.api.grpc.Contact customerContact = 1;
+
+    // Notes captured by a person who entered this booking (may also be customer itself if booked online). Optional.
+    string notes = 2;
+
+    // Day of the event should take place. Mandatory for all but PASS type activities.
+    // Must match available date, as provided provided with ProductAvailabilityWithRatesResponse::date
+    io.bokun.inventory.common.api.grpc.Date date = 3;
+
+    // Desired start time. Mandatory if ProductDescription::bookingType is DATE_AND_TIME, otherwise null.
+    // Must match available time, as provided with ProductAvailabilityWithRatesResponse::time
+    io.bokun.inventory.common.api.grpc.Time time = 4;
+
+    // Whether pickup is required. Only relevant if ProductDescription::pickupAvailable of booked product is true.
+    bool pickupRequired = 5;
+
+    oneof pickupPlace {
+        // Custom pickup location. Only relevant if ProductDescription::pickupAvailable and ProductDescription::customPickupPlaceAllowed are true and
+        // if customer actually wants custom location.
+        string customPickupPlace = 6;
+
+        // Pickup location. Only relevant if ProductDescription::pickupAvailable is true. Should only be set if ::pickupRequired is true.
+        // Should match location from ProductDescription::pickupPlaces of booked product.
+        io.bokun.inventory.common.api.grpc.PickupDropoffPlace predefinedPickupPlace = 7;
+    }
+
+    // Whether drop off is required. Only relevant if ProductDescription::dropoffAvailable of booked product is true.
+    bool dropoffRequired = 8;
+
+    oneof dropoffPlace {
+        // Custom drop off location. Only relevant if ProductDescription::dropoffAvailable and ProductDescription::customDropoffPlaceAllowed are true and
+        // if customer actually wants custom location.
+        string customDropoffPlace = 9;
+
+        // Drop off location. Only relevant if ProductDescription::dropoffAvailable is true. Should only be set if ::dropoffRequired is true.
+        // Should match location from ProductDescription::dropoffPlaces of booked product.
+        io.bokun.inventory.common.api.grpc.PickupDropoffPlace predefinedDropoffPlace = 10;
+    }
+
+    // Reservations for this request. Each reservation should be formed for concrete pricing category, rate and product
+    repeated io.bokun.inventory.common.api.grpc.Reservation reservations = 11;
+
+    // This is some unique id which is genarated by the Bókun platform for this reservation. Plugins may ignore it, or may use this field in order
+    // to make backrefrence from their own reservation/booking towards platform reservation/booking.
+    string platformId = 12;
+
+    // Booking source from which booking has originated
+    io.bokun.inventory.common.api.grpc.BookingSource bookingSource = 13;
+
+    // In case this was booked by an external source (such as Expedia, Get Your Guide, Viator, etc.) this field will contain the reference number
+    // which came from that source.
+    string externalSaleId = 14;
+
+    // In case of agent booking - agent code. Optional
+    string agentCode = 15;
+
+    // This refers to a booking ID in Bokun platform. Sent at earliest possibility; guaranteed to be sent at confirmation stage.
+    string platformBookingId = 16;
+}
+
+message ConfirmBookingRequest {
+    // product, *exactly* as used with CreateReservation request. Mandatory.
+    io.bokun.inventory.service.common.grpc.BokunProduct bokunProduct = 1;
+
+    // Exactly as returned by io.bokun.inventory.common.api.grpc.SuccessfulReservation::reservationConfirmationCode. Mandatory.
+    string reservationConfirmationCode = 2;
+
+    // What kind of tickets do you want the remote end to generate? This must be supported by a booked product, see ProductDescription::ticketSupport
+    // Mandatory.
+    io.bokun.inventory.common.api.grpc.TicketSupport ticketingType = 3;
+
+    // Reservation data, exactly as specified in reservation step, except contacts (both for leading passenger as well as other travellers which
+    // may change). Supplied for convenience where 3rd party APIs might require different items at different stages.
+    ReservationData reservationData = 4;
+}
+
+message CancelBookingRequest {
+    // product, *exactly* as used with CreateReservation request. Mandatory.
+    io.bokun.inventory.service.common.grpc.BokunProduct bokunProduct = 1;
+
+    // Exactly as returned by io.bokun.inventory.common.api.grpc.SuccessfulBooking::bookingConfirmationCode. Mandatory.
+    string bookingConfirmationCode = 2;
+
+    // agent code if passed. Optional.
+    string agentCode = 3;
+}
+
+message AmendBookingRequest {
+    // Exactly as returned by io.bokun.inventory.common.api.grpc.SuccessfulBooking::bookingConfirmationCode. Mandatory if booking was successfully
+    // confirmed. In exceptional case (e.g. booking was imported) this might be omitted.
+    string bookingConfirmationCode = 1;
+
+    // Exactly as supplied with ConfirmBookingRequest::reservationData::platformId. Mandatory.
+    string platformId = 2;
+
+    // product, *exactly* as used with CreateReservation request. Mandatory.
+    io.bokun.inventory.service.common.grpc.BokunProduct bokunProduct = 3;
+
+    // What kind of tickets do you want the remote end to generate? This must be supported by a booked product, see ProductDescription::ticketSupport
+    // Mandatory.
+    io.bokun.inventory.common.api.grpc.TicketSupport ticketingType = 4;
+
+    // Reservation information; contains all the necessary data for rebooking. Mandatory.
+    ReservationData reservationData = 5;
+}

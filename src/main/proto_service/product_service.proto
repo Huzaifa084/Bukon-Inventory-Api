@@ -1,0 +1,97 @@
+syntax = "proto3";
+
+package io.bokun.inventory.service.product.grpc;
+
+option java_multiple_files = true;
+option java_package = "io.bokun.inventory.service.product.grpc";
+
+import "common.proto";
+import "inventory_service_common.proto";
+
+service ProductService {
+    // Searches for available products.
+    // Returned ids (of products, rates, pricing categories, etc.) are always external.
+    rpc SearchProducts (SearchProductsRequest) returns (stream io.bokun.inventory.common.api.grpc.BasicProductInfo) {}
+
+    // Returns detailed product information by given id (ids refer to ProductDescription::id)
+    // Returned ids (of products, rates, pricing categories, etc.) are always external.
+    rpc GetProductById (GetProductByIdRequest) returns (io.bokun.inventory.common.api.grpc.ProductDescription) {}
+
+    // Inserts or updates product mapping.
+    rpc UpsertProductMapping (ProductMapping) returns (ProductMapping) {}
+
+    // Retrieves all mappings (or selected mappings for given products) for a given vendor.
+    rpc GetProductMappings (GetProductMappingsRequest) returns (stream ProductMapping) {}
+
+    // Deletes product mapping.
+    rpc DeleteProductMapping (ProductMappingIdentifier) returns (io.bokun.inventory.common.api.grpc.Empty) {}
+}
+
+message GetProductByIdRequest {
+    string pluginId = 1;
+
+    int64 vendorId = 2;
+
+    // reference to product id on the remote end. Mandatory
+    string externalId = 3;
+}
+
+message SearchProductsRequest {
+    // Mandatory.
+    string pluginId = 1;
+
+    // Mandatory
+    int64 vendorId = 2;
+
+    // Name of product, optional.
+    string name = 3;
+
+    // ISO ALPHA-2 code, optional
+    string country = 4;
+
+    // City to get products for. Optional.
+    string city = 5;
+}
+
+message ProductMapping {
+    // if omitted, mapping will be created for upsert op. Otherwise updated
+    string id = 1;
+
+    // Mandatory.
+    string pluginId = 2;
+
+    // Mandatory.
+    int64 vendorId = 3;
+
+    // Bokun product which is mapped against inventory product. Mandatory.
+    io.bokun.inventory.service.common.grpc.BokunProduct bokunProduct = 4;
+
+    // Inventory product which is mapped against Bokun product. Mandatory.
+    string inventoryProductId = 5;
+
+    // Mappings between external and internal pricing categories. Mandatory (should have at least one element)
+    repeated io.bokun.inventory.service.common.grpc.BokunToExternalMapping pricingCategoryMappings = 6;
+
+    // Mappings between external and internal rates. Mandatory (should have at least one element)
+    repeated io.bokun.inventory.service.common.grpc.BokunToExternalMapping rateMappings = 7;
+
+    // Mappings between external and internal extras. Optional
+    repeated io.bokun.inventory.service.common.grpc.BokunToExternalMapping extraMappings = 8;
+}
+
+message ProductMappingIdentifier {
+    string pluginId = 1;
+    io.bokun.inventory.service.common.grpc.BokunProduct bokunProduct = 2;
+}
+
+message GetProductMappingsRequest {
+    // plugin id to get mapped products for. Optional: if passed, it will filter by given plugin definition id, otherwise all definitions will match.
+    string pluginId = 1;
+
+    // vendor to get mapped products for. Mandatory.
+    int64 vendorId = 2;
+
+    // For which Bokun products to get mapping for? If the list is empty/null, it will return all mappings.
+    // If the list has at least one element, it will try to find mappings for specified product(s) only.
+    repeated io.bokun.inventory.service.common.grpc.BokunProduct bokunProducts = 3;
+}

@@ -1,0 +1,160 @@
+syntax = "proto3";
+
+package io.bokun.inventory.service.plugin.grpc;
+
+option java_multiple_files = true;
+option java_package = "io.bokun.inventory.service.plugin.grpc";
+
+import "google/protobuf/wrappers.proto";
+import "common.proto";
+import "inventory_service_common.proto";
+
+service PluginService {
+    // Registers a new plugin to the system by given url
+    rpc RegisterPlugin (PluginUrl) returns (PluginDefinition) {}
+
+    // Moves plugin to a new URL
+    rpc MovePlugin(MovePluginRequest) returns (PluginDefinition) {}
+
+    // Unregisters existing plugin from the system by given url which was previously registered with RegisterPlugin
+    rpc UnregisterPlugin (PluginUnregistrationRequest) returns (io.bokun.inventory.common.api.grpc.Empty) {}
+
+    // List definitions.
+    rpc ListDefinitions (ListDefinitionsRequest) returns (stream PluginDefinition) {}
+
+    // Returns plugin definition by given id.
+    rpc GetDefinition (GetDefinitionRequest) returns (PluginDefinition) {}
+
+    // Configure existing plugin for a given vendor.
+    rpc ConfigurePlugin (PluginConfiguration) returns (io.bokun.inventory.common.api.grpc.Empty) {}
+
+    // List all configured plugins for given vendor
+    rpc ListConfiguredPlugins (ListConfiguredPluginsRequest) returns (stream PluginConfiguration) {}
+
+    // Delete configured plugin for a vendor
+    rpc DeleteConfiguredPlugin (DeletePluginConfigurationRequest) returns (io.bokun.inventory.common.api.grpc.Empty) {}
+
+    rpc LinkPluginToVendors (LinkPluginToVendorsRequest) returns (io.bokun.inventory.common.api.grpc.Empty) {}
+
+    rpc GetPluginVendors (GetPluginVendorsRequest) returns (GetPluginVendorsResponse) {}
+ }
+
+// Transport protocol each plugin implements
+enum PluginTransport {
+    UNASSIGNED_PLUGIN_TRANSPORT = 0;
+    GRPC = 1;
+    REST = 2;
+}
+
+message PluginUrl {
+    // URL of plugin which is listening on a socket. Mandatory.
+    string url = 1;
+
+    // Whether this plugin supports TLS/SSL. Mandatory.
+    bool tls = 2;
+
+    // SSL certificate file, only used if tls=true.
+    string cert = 3;
+
+    // In case if there is a secret shared between server and client (regardless of TLS usage). Applicable for transport=GRPC only. Optional
+    string sharedSecret = 4;
+
+    // Type of transport protocol this plugin requires. Optional, defaults to GRPC if unset.
+    PluginTransport transport = 5;
+
+    // Username for basic authentication to use for every request. Applicable for transport=REST only. Optional.
+    google.protobuf.StringValue basicAuthUsername = 6;
+
+    // Password for basic authentication to use for every request. Applicable for transport=REST only. Optional.
+    google.protobuf.StringValue basicAuthPassword = 7;
+}
+
+message MovePluginRequest {
+    // ID of plugin to move to a new URL
+    string id = 1;
+
+    // Address (and configuration parameters) of the plugin. Mandatory.
+    PluginUrl pluginAddress = 2;
+}
+
+message GetDefinitionRequest {
+    // id of plugin to get definition for. Mandatory.
+    string pluginDefinitionId = 1;
+
+    // Whether to use cached data from Inventory Service only and do not reach out to the external plugin to fetch the definition anew.
+    // Defaults to false, meaning extra call to the plugin is made.
+    bool useCachedDataOnly = 2;
+}
+
+// As this is Bokun-internal API, we add a few more fields to the plugin definition which is publicly traded
+message PluginDefinition {
+    string id = 1;
+    string url = 2;
+
+    // name of definition
+    string name = 3;
+
+    // description of definition, optional
+    string description = 4;
+
+    // What does this plugin support? Mandatory.
+    repeated io.bokun.inventory.common.api.grpc.PluginCapability capabilities = 5;
+
+    // List of parameters this plugin should be configured with. Mandatory.
+    repeated io.bokun.inventory.common.api.grpc.PluginConfigurationParameter parameters = 6;
+
+    // whether TLS/SSL is required for this plugin
+    bool tls = 7;
+
+    // SSL certificate. Only used if tls=true.
+    string cert = 8;
+
+    // In case if there is a secret shared between server and client (regardless of TLS usage). Optional
+    string sharedSecret = 9;
+
+    // Type of transport protocol this plugin requires.
+    PluginTransport transport = 10;
+
+    // Username for basic authentication to use for every request. Applicable for transport=REST only.
+    google.protobuf.StringValue basicAuthUsername = 11;
+
+    // Password for basic authentication to use for every request. Applicable for transport=REST only.
+    google.protobuf.StringValue basicAuthPassword = 12;
+}
+
+message PluginUnregistrationRequest {
+    string id = 1;          // unregister by either id or url, whichever comes first
+    string url = 2;
+}
+
+message PluginConfiguration {
+    int64 vendorId = 1;
+    string pluginId = 2;        // if absent, a new plugin will be created. Otherwise existing plugin will be used
+    repeated io.bokun.inventory.common.api.grpc.PluginConfigurationParameterValue parameterValues = 3;
+}
+
+message DeletePluginConfigurationRequest {
+    int64 vendorId = 1;
+    string pluginId = 2;
+}
+
+message ListDefinitionsRequest {
+    int64 vendorId = 1;     // optional, lists plugins for specified vendor if set. Otherwise all definitions.
+}
+
+message ListConfiguredPluginsRequest {
+    int64 vendorId = 1;     // mandatory
+}
+
+message LinkPluginToVendorsRequest {
+    string pluginId = 1;     // mandatory
+    repeated int64 vendorIds = 2;      // vendor IDs. Can be empty to wipe out all links for said plugin.
+}
+
+message GetPluginVendorsRequest {
+    string pluginId = 1;
+}
+
+message GetPluginVendorsResponse {
+    repeated int64 vendorIds = 1;
+}
